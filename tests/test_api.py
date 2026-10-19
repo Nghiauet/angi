@@ -1,0 +1,146 @@
+from angi.config import settings
+from angi.ollama_client import OllamaDown, OllamaTimeout
+
+
+def good_line(messages):
+    # echo a valid Vietnamese line mentioning the dish from the last user message
+    user = messages[-1]["content"]
+    dish = user.split("Món: ")[1].split(".")[0]
+    return f"Trưa nay {dish} là chân ái, chốt nhé bạn ơi!"
+
+
+def test_happy_path(make_client):
+    _, client = make_client(good_line)
+    resp = client.post("/api/suggest", json={"budget": "50", "mood": "vui", "rejected": []})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["dish"]
+    assert data["dish"] in data["line"]
+    assert data["tier"] == 0
+    assert data["fallback"] is False
+    assert data["price_tier"] in (1, 2)
+    assert resp.headers["cache-control"] == "no-store"
+
+
+def test_tier_escalates_with_rejections(make_client):
+    _, client = make_client(good_line)
+    resp = client.post("/api/suggest", json={"rejected": ["Phở bò"] * 6})
+    data = resp.json()
+    assert data["tier"] == 3
+
+
+def test_tier_deep_escalation(make_client):
+    _, client = make_client(good_line)
+    assert client.post("/api/suggest", json={"rejected": ["x"] * 10}).json()["tier"] == 4
+    assert client.post("/api/suggest", json={"rejected": ["x"] * 20}).json()["tier"] == 5
+
+
+def test_retry_recovers_after_reject(make_client):
+    calls = []
+
+    def flaky(messages):
+        calls.append(1)
+        if len(calls) == 1:
+            return "喝一碗暖和的鸡汤吧"  # CJK drift -> validator rejects
+        return good_line(messages)
+
+    _, client = make_client(flaky)
+    data = client.post("/api/suggest", json={}).json()
+    assert len(calls) == 2
+    assert data["fallback"] is False  # ok_retry counts as success
+    assert data["dish"] in data["line"]
+
+
+def test_double_reject_falls_to_canned(make_client):
+    _, client = make_client(lambda m: "喝一碗暖和的鸡汤吧")
+    data = client.post("/api/suggest", json={}).json()
+    assert data["fallback"] is True
+    assert data["dish"] in data["line"]
+
+
+def test_broke_flag_in_response(make_client):
+    _, client = make_client(good_line)
+    data = client.post("/api/suggest", json={"budget": "20", "client_date": "2026-07-28"}).json()
+    assert data["broke"] is True
+    data = client.post("/api/suggest", json={"budget": "20", "client_date": "2026-07-10"}).json()
+    assert data["broke"] is False
+
+
+def test_weather_endpoint(make_client):
+    _, client = make_client(good_line)
+    # weather disabled in tests -> degrades to any/None, but shape must hold
+    resp = client.get("/api/weather", params={"city": "hn"})
+    assert resp.status_code == 200
+    assert resp.json() == {"weather": "any", "temp_c": None}
+    assert client.get("/api/weather", params={"city": "paris"}).status_code == 400
+    assert client.get("/api/weather").status_code == 400
+
+
+def test_fallback_on_ollama_down(make_client):
+    def boom(messages):
+        raise OllamaDown()
+
+    _, client = make_client(boom)
+    resp = client.post("/api/suggest", json={})
+    data = resp.json()
+    assert resp.status_code == 200  # NEVER errors for LLM problems
+    assert data["fallback"] is True
+    assert data["dish"] in data["line"]
+
+
+def test_fallback_on_timeout(make_client):
+    def slow(messages):
+        raise OllamaTimeout()
+
+    _, client = make_client(slow)
+    data = client.post("/api/suggest", json={}).json()
+    assert data["fallback"] is True
+
+
+def test_fallback_on_garbage_output(make_client):
+    _, client = make_client(lambda m: "As an AI assistant I think you should eat something nice")
+    data = client.post("/api/suggest", json={}).json()
+    assert data["fallback"] is True
+    assert data["dish"] in data["line"]  # canned line still mentions the dish
+
+
+def test_fallback_on_queue_full(make_client):
+    app, client = make_client(good_line)
+    app.state.gate.waiting = settings.max_queue
+    data = client.post("/api/suggest", json={}).json()
+    assert data["fallback"] is True
+    app.state.gate.waiting = 0
+
+
+def test_400_on_malformed(make_client):
+    _, client = make_client(good_line)
+    assert client.post("/api/suggest", content=b"not json",
+                       headers={"Content-Type": "application/json"}).status_code == 400
+    assert client.post("/api/suggest", json={"rejected": "not-a-list"}).status_code == 400
+
+
+def test_unknown_enums_treated_as_null(make_client):
+    _, client = make_client(good_line)
+    resp = client.post("/api/suggest", json={"budget": "1000k", "mood": "hangry", "city": "paris"})
+    assert resp.status_code == 200
+    assert resp.json()["weather"] is None
+
+
+def test_rejected_capping(make_client):
+    _, client = make_client(good_line)
+    resp = client.post("/api/suggest", json={"rejected": ["x" * 500] * 100 + [123, None]})
+    assert resp.status_code == 200
+
+
+def test_budget_respected(make_client):
+    _, client = make_client(good_line)
+    for _ in range(10):
+        data = client.post("/api/suggest", json={"budget": "20"}).json()
+        assert data["price_tier"] == 1
+
+
+def test_429_rate_limit(make_client):
+    _, client = make_client(good_line)
+    codes = [client.post("/api/suggest", json={}).status_code for _ in range(settings.rate_rpm + 1)]
+    assert codes[-1] == 429
+    assert all(c == 200 for c in codes[:-1])

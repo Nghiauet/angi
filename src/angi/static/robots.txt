@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://angi.wakeuplate.io.vn/sitemap.xml

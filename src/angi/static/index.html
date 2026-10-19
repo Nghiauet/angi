@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hôm nay ăn gì? Trưa nay ăn gì? — Máy chọn món cà khịa</title>
+  <meta name="description" content="Không biết hôm nay ăn gì, trưa nay ăn gì? Để AI quyết định giùm bạn — kèm thái độ. Chọn theo túi tiền, tâm trạng, thời tiết. Miễn phí, không cần đăng ký.">
+  <link rel="canonical" href="https://angi.wakeuplate.io.vn/">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/style.css">
+  <meta name="theme-color" content="#FF7A29">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://angi.wakeuplate.io.vn/">
+  <meta property="og:title" content="Hôm nay ăn gì? — Để AI cà khịa quyết định giùm bạn">
+  <meta property="og:description" content="Máy chọn món trưa có thái độ: chê càng nhiều, nó càng mặn. Miễn phí, không cần đăng ký.">
+  <meta property="og:image" content="https://angi.wakeuplate.io.vn/og.png">
+  <meta property="og:locale" content="vi_VN">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "Hôm nay ăn gì? — Máy chọn món cà khịa",
+    "url": "https://angi.wakeuplate.io.vn/",
+    "applicationCategory": "LifestyleApplication",
+    "operatingSystem": "Web",
+    "offers": {"@type": "Offer", "price": "0", "priceCurrency": "VND"},
+    "inLanguage": "vi"
+  }
+  </script>
+</head>
+<body>
+  <header class="hero">
+    <div class="brand"><span class="mascot" id="mascot">🍜</span> Hôm nay ăn gì?</div>
+    <h1>Trưa nay ăn gì? Để AI quyết định giùm bạn</h1>
+    <p class="tagline">— kèm thái độ. Chê càng nhiều, nó càng mặn. 😏</p>
+  </header>
+
+  <main>
+    <section class="card" aria-label="Chọn món">
+      <div class="chips-label">Túi tiền hôm nay:</div>
+      <div class="chips" data-group="budget">
+        <button class="chip" data-value="20">Dưới 25k 🪙</button>
+        <button class="chip" data-value="50">Dưới 50k 💵</button>
+        <button class="chip" data-value="max">Thoải mái 💳</button>
+      </div>
+      <div class="chips-label">Tâm trạng:</div>
+      <div class="chips" data-group="mood">
+        <button class="chip" data-value="vui">Đang vui 😄</button>
+        <button class="chip" data-value="met">Mệt 🫠</button>
+        <button class="chip" data-value="deadline">Chạy deadline 🔥</button>
+      </div>
+      <div class="chips-label">Bạn ở đâu? <span class="weather-badge" id="weather-badge" hidden></span></div>
+      <div class="chips" data-group="city">
+        <button class="chip" data-value="hn">Hà Nội</button>
+        <button class="chip" data-value="sg">Sài Gòn</button>
+      </div>
+      <button class="big-btn" id="roll-btn">Chọn giùm tôi! 🎲</button>
+    </section>
+
+    <section class="card result-card" id="result-card" hidden aria-live="polite">
+      <div class="tier-face" id="tier-face" aria-hidden="true"></div>
+      <div class="dish" id="dish"></div>
+      <p class="line" id="line"></p>
+      <div class="meta-row">
+        <span class="weather-line" id="weather-line" hidden></span>
+        <span class="broke-badge" id="broke-badge" hidden>💸 Chế độ cuối tháng</span>
+      </div>
+      <div class="result-actions">
+        <button class="action accept" id="accept-btn">Chốt món này 😋</button>
+        <button class="action reroll" id="reroll-btn">Không chịu, đổi món 😤</button>
+        <button class="action share" id="share-btn">Khoe vào nhóm 📤</button>
+      </div>
+      <p class="reject-count" id="reject-count" hidden></p>
+      <p class="streak" id="streak" hidden></p>
+    </section>
+
+    <section class="content">
+      <h2>Trưa nay ăn gì? Để app cà khịa này quyết</h2>
+      <p>Câu hỏi khó nhất của dân văn phòng không phải KPI — mà là <strong>"hôm nay ăn gì?"</strong>. App này chọn giùm bạn trong gần 170 món Việt, theo túi tiền, tâm trạng và cả thời tiết thật ở Hà Nội / Sài Gòn. Điểm khác biệt: nó có thái độ. Bạn chê một món, nó trêu nhẹ. Chê năm món, nó nghi ngờ vấn đề nằm ở bạn. Chê mười lăm món? Nó xin chữ ký của bạn luôn. Chê đủ nhiều còn được gắn huy hiệu 🏆.</p>
+      <h2>Cách chơi</h2>
+      <ol>
+        <li>Chọn túi tiền / tâm trạng / thành phố (không bắt buộc).</li>
+        <li>Bấm <strong>"Chọn giùm tôi!"</strong> — nhận món + một câu nhận xét.</li>
+        <li>Không ưng? Bấm đổi món và xem nó mặn dần. 🌶️</li>
+        <li>Bấm <strong>"Khoe vào nhóm"</strong> để gửi vào group chat cho cả team cùng quyết.</li>
+      </ol>
+      <p class="note">Miễn phí, không cần đăng ký, không lưu gì cả. AI chạy trên máy chủ cá nhân tại Việt Nam. Cuối tháng có chế độ "ví mỏng" tự động. 🍜</p>
+    </section>
+  </main>
+
+  <footer>
+    <p>Anh em của <a href="https://tiengviet.wakeuplate.io.vn/">tiengviet</a> &amp; <a href="https://gohome.wakeuplate.io.vn/">gohome</a> — Làm tại Việt Nam 🇻🇳</p>
+  </footer>
+
+  <div class="toast" id="toast" hidden></div>
+  <canvas id="share-canvas" width="1080" height="1080" hidden></canvas>
+  <script src="/app.js"></script>
+</body>
+</html>

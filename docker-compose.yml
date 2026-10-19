@@ -1,0 +1,25 @@
+services:
+  angi:
+    build: .
+    image: angi:latest
+    container_name: angi
+    # REQUIRED: host Ollama listens on 127.0.0.1:11434 ONLY, so the app must
+    # share the host network namespace to reach it. Under network_mode: host,
+    # `ports:` mappings are IGNORED — uvicorn itself binds 127.0.0.1:46405
+    # (see Dockerfile CMD), which preserves the loopback-only rule.
+    # NEVER change the bind to 0.0.0.0: that would expose the app to the LAN.
+    network_mode: host
+    restart: unless-stopped
+    user: "1000:1000"  # write the ./data bind mount as the host user
+    environment:
+      OLLAMA_URL: http://127.0.0.1:11434
+      MODEL: qwen2.5:7b-instruct-q4_K_M
+      USAGE_FILE: /data/usage.jsonl
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:46405/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
