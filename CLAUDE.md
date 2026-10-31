@@ -43,7 +43,11 @@ wheel with attitude.
   bad line class in logs → add a shot here, verify with scripts/preview_lines.py
   (≥90% single-shot bar; production adds a retry → ~96% effective).
 - `src/angi/api.py` — after a validation reject, ONE retry at temperature 0.6 (status
-  `ok_retry`, counts as success) before falling to canned (`canned_reject`).
+  `ok_retry`, counts as success) before falling to canned (`canned_reject`). Other
+  canned statuses: `canned_queue` (GPU queue full), `canned_down`, `canned_timeout`
+  (incl. the 20 s total deadline), `canned_error` (Ollama 4xx / bad body / anything
+  unexpected), `canned_busy` (global LLM budget used up). Only catalog dish names from
+  `rejected` reach the prompt (prompt-injection guard in `prompts.build_messages`).
 - `src/angi/weather.py` — open-meteo HN/SG, silent degrade to "any"; `current_full`
   also returns temp_c for the `/api/weather` chip badge.
 
@@ -51,9 +55,11 @@ wheel with attitude.
 
 - `GET /health` → `{"status":"ok"}`.
 - `POST /api/suggest` `{budget: "20"|"50"|"max"|null, mood: "vui"|"met"|"deadline"|null,
-  city: "hn"|"sg"|null, rejected: [names], client_date: "YYYY-MM-DD"}` →
+  city: "hn"|"sg"|null, rejected: [names], client_date: "YYYY-MM-DD"}` (wrong-typed
+  enums are treated as null; the 30 most recent `rejected` names are used) →
   `{dish, line, tier: 0-5, fallback, price_tier, category, weather, broke}`.
-  Always 200 for valid input. 400 only malformed shape; 429 only rate limiter
+  Always 200 for valid input. 400 malformed shape; 413 body > 64 KB; 415 unless
+  `Content-Type: application/json` (blocks cross-site simple POSTs); 429 only rate limiter
   (20 req/min per visitor, keyed on CF-Connecting-IP, IPv6 per /64 — nginx's
   X-Real-IP is always 127.0.0.1 here, cloudflared is local). Broke mode: day >= 25
   + budget "20" → mì tôm jokes.
