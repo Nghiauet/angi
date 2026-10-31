@@ -80,8 +80,11 @@ card, localStorage daily session), Docker multi-stage uv build, host Ollama
 
 ## Ops notes
 
-- **Shares the GPU + model with tiengviet** — same model means no VRAM eviction, but
-  generations serialize across both apps; angi's 12s timeout → canned line keeps UX OK.
+- **Shares the GPU** (6 GB, one big model at a time — see the hub CLAUDE.md, "Local LLM").
+  tiengviet, which used the same model, was archived 2026-10-31: angi is now the caller
+  that keeps `qwen2.5:7b-instruct-q4_K_M` in Ollama, and loading it evicts the everyday
+  model. If that model is removed, angi serves canned lines (status `canned_error`).
+  Line budget: 12 s per Ollama call, 20 s total including the GPU queue → canned line.
 - Health metric: fallback rate. `jq 'select(.fallback==true)' data/usage.jsonl | wc -l`
   vs total — if >15%, tune prompts (step: preview_lines.py).
 - Rate-limit state is in-memory, resets on restart. Besides the per-visitor 429

@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     ollama_url: str = "http://127.0.0.1:11434"
-    model: str = "qwen2.5:7b-instruct-q4_K_M"  # same model as tiengviet -> shared VRAM residency
+    model: str = "qwen2.5:7b-instruct-q4_K_M"  # persona tuned on this model (scripts/preview_lines.py)
     host: str = "127.0.0.1"  # never 0.0.0.0 — container uses host networking
     port: int = 46405
     temperature: float = 0.8  # creative but stable — 0.9 made qwen code-switch to Chinese
