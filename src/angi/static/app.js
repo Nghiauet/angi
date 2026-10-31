@@ -75,12 +75,21 @@
   document.querySelectorAll(".chips").forEach((group) => {
     const name = group.dataset.group;
     group.querySelectorAll(".chip").forEach((chip) => {
-      if (name === "city" && chip.dataset.value === state.city) chip.classList.add("active");
+      // aria-pressed: the selected state was only a CSS class, invisible to screen readers
+      const on = name === "city" && chip.dataset.value === state.city;
+      chip.classList.toggle("active", on);
+      chip.setAttribute("aria-pressed", String(on));
       chip.addEventListener("click", () => {
         const was = chip.classList.contains("active");
-        group.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+        group.querySelectorAll(".chip").forEach((c) => {
+          c.classList.remove("active");
+          c.setAttribute("aria-pressed", "false");
+        });
         picks[name] = was ? null : chip.dataset.value;
-        if (!was) chip.classList.add("active");
+        if (!was) {
+          chip.classList.add("active");
+          chip.setAttribute("aria-pressed", "true");
+        }
         if (name === "city") {
           state.city = picks.city;
           save();
