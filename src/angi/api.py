@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 ERR_BAD_REQUEST = "Yêu cầu không hợp lệ."
 ERR_TOO_LARGE = "Yêu cầu quá lớn."
+ERR_MEDIA_TYPE = "Chỉ nhận JSON (Content-Type: application/json)."
 ERR_RATE = "Từ từ thôi! Đổi món gì mà nhanh thế. Đợi một phút nhé."
 
 # A real body is a few hundred bytes (budget/mood/city + rejected dish names);
@@ -46,6 +47,14 @@ class _BadBody(Exception):
 async def _read_json(request: Request):
     """Parse the JSON body, refusing anything over MAX_BODY_BYTES without
     buffering it (uvicorn itself has no body-size limit)."""
+    # Require a JSON content type. Without this, any other website could make
+    # its visitors' browsers POST here as a CORS "simple request" (text/plain,
+    # or a Blob with no type) — no preflight, a fresh IP per visitor, and GPU
+    # work for us. application/json forces a preflight, which this app (no
+    # CORS headers) fails, so browsers never send the cross-site request.
+    media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if media_type != "application/json":
+        raise _BadBody(415, ERR_MEDIA_TYPE)
     declared = request.headers.get("content-length")
     if declared is not None:
         try:

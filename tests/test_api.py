@@ -165,8 +165,9 @@ def test_wrong_typed_fields_are_ignored_not_500(make_client):
 
 def test_non_object_json_is_400(make_client):
     _, client = make_client(good_line)
-    for body in ([1, 2], "phở", 42, None):
-        assert client.post("/api/suggest", json=body).status_code == 400
+    for body in (b"[1, 2]", '"phở"'.encode(), b"42", b"null", b""):
+        resp = client.post("/api/suggest", content=body, headers={"Content-Type": "application/json"})
+        assert resp.status_code == 400, body
 
 
 def test_invalid_utf8_body_is_400(make_client):
@@ -388,3 +389,25 @@ def test_gpu_queue_wait_is_bounded(make_client, monkeypatch):
     assert time.monotonic() - started < 3
     assert resp.json()["fallback"] is True
     assert app.state.gate.waiting == 0
+
+
+def test_non_json_content_type_is_415(make_client):
+    # cross-site "simple requests" (no CORS preflight) can't use application/json
+    calls = []
+
+    def counting(messages):
+        calls.append(1)
+        return good_line(messages)
+
+    _, client = make_client(counting)
+    for headers in (
+        {"Content-Type": "text/plain;charset=UTF-8"},
+        {"Content-Type": "application/x-www-form-urlencoded"},
+        {"Content-Type": "multipart/form-data; boundary=x"},
+        {},
+    ):
+        resp = client.post("/api/suggest", content=b"{}", headers=headers)
+        assert resp.status_code == 415, headers
+    assert calls == []  # no GPU work for any of them
+    ok = client.post("/api/suggest", content=b"{}", headers={"Content-Type": "Application/JSON; charset=utf-8"})
+    assert ok.status_code == 200
