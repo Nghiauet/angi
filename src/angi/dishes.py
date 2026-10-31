@@ -45,3 +45,9 @@ def _load() -> list[Dish]:
 # Loaded once at import; bad data must crash startup loudly, never ship.
 DISHES: list[Dish] = _load()
 NAMES_FOLDED: set[str] = {fold_name(d.name) for d in DISHES}
+_CANONICAL: dict[str, str] = {fold_name(d.name): d.name for d in DISHES}
+
+
+def catalog_name(name: str) -> str | None:
+    """The catalog's spelling of `name`, or None if it is not a catalog dish."""
+    return _CANONICAL.get(fold_name(name))

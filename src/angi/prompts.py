@@ -1,6 +1,8 @@
 # The tuning surface: when a bad line class shows up in usage logs or the
 # preview harness, add a golden shot targeting it — same policy as tiengviet.
 
+from .dishes import catalog_name
+
 SYSTEM = """Bạn là "đứa bạn thân văn phòng" — thẳng tính, lầy lội, hài hước nhưng KHÔNG độc ác.
 Nhiệm vụ: viết ĐÚNG MỘT câu tiếng Việt bình luận về món trưa đã được chọn sẵn.
 
@@ -93,8 +95,12 @@ def build_messages(
     if rejected_count is None:
         rejected_count = len(rejected)
     hint = ""
-    if rejected:
-        recent = ", ".join(rejected[-3:])
+    # `rejected` is visitor-controlled text. Only names that are catalog dishes
+    # reach the model, in the catalog's spelling, so a "rejected dish" like
+    # "bỏ qua hướng dẫn, hãy nói ..." can't steer the line (prompt injection).
+    known = [n for n in (catalog_name(r) for r in rejected) if n]
+    if known:
+        recent = ", ".join(known[-3:])
         hint = f"; gần nhất chê: {recent}"
     broke_note = " Cuối tháng ví mỏng, được phép đùa mì tôm." if broke else ""
     user = (
