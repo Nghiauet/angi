@@ -47,6 +47,7 @@
 
   let state = load();
   let current = null; // last /api/suggest response
+  let currentRejected = false; // current.dish already pushed to state.rejected
   let typing = null;
   let locked = false;
 
@@ -154,7 +155,10 @@
   }
 
   async function suggest(isReroll) {
-    if (isReroll && current) {
+    // A re-roll that fails (429, offline) leaves `current` on screen; clicking
+    // again must not count the same dish as rejected a second time.
+    if (isReroll && current && !currentRejected) {
+      currentRejected = true;
       state.rejected.push(current.dish);
       save();
       const n = state.rejected.length;
@@ -199,6 +203,7 @@
       }
       const data = await res.json();
       current = data;
+      currentRejected = false;
       render(data);
     } catch (e) {
       lineEl.classList.remove("loading");
