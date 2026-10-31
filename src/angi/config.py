@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     num_ctx: int = 2048
     keep_alive: str = "30m"
     line_timeout_s: float = 12.0  # timeout -> canned line, never an error
+    # Whole-line budget INCLUDING the wait for the GPU queue (line_timeout_s only
+    # covers one HTTP call). Longest uncontended path: retry_budget_s + line_timeout_s.
+    line_deadline_s: float = 20.0
     retry_temperature: float = 0.6  # calmer second attempt after a validation reject
     retry_budget_s: float = 6.0  # only retry if the first attempt came back fast enough
     rate_rpm: int = 20  # re-rolling IS the product, be generous

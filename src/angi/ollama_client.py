@@ -7,12 +7,21 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 
-class OllamaDown(Exception):
+class OllamaError(Exception):
+    """No usable line from Ollama. Callers fall back to a canned line."""
+
+
+class OllamaDown(OllamaError):
     pass
 
 
-class OllamaTimeout(Exception):
+class OllamaTimeout(OllamaError):
     pass
+
+
+class OllamaBadResponse(OllamaError):
+    """Ollama answered, but not with a line: a 4xx (e.g. 404 when the model
+    was removed or renamed) or a body that isn't the /api/chat shape."""
 
 
 class OllamaClient:
@@ -42,14 +51,26 @@ class OllamaClient:
         except (httpx.ConnectError, httpx.ConnectTimeout) as e:
             self.known_down = True
             raise OllamaDown() from e
-        except httpx.ReadTimeout as e:
+        except httpx.TimeoutException as e:  # read / write / pool timeout
             raise OllamaTimeout() from e
+        except httpx.HTTPError as e:
+            # connection dropped mid-request (ReadError, RemoteProtocolError):
+            # typically Ollama restarting or being upgraded
+            self.known_down = True
+            raise OllamaDown() from e
         if resp.status_code >= 500:
             self.known_down = True
             raise OllamaDown()
-        resp.raise_for_status()
         self.known_down = False
-        return resp.json()["message"]["content"]
+        if resp.status_code != 200:
+            raise OllamaBadResponse(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            content = resp.json()["message"]["content"]
+        except (ValueError, KeyError, TypeError) as e:
+            raise OllamaBadResponse(f"malformed /api/chat body: {resp.text[:200]}") from e
+        if not isinstance(content, str):
+            raise OllamaBadResponse(f"non-string content: {content!r:.200}")
+        return content
 
     async def ping(self) -> bool:
         try:

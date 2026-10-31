@@ -260,3 +260,131 @@ def test_free_text_in_rejected_never_reaches_the_prompt(make_client):
     assert "xyz.com" not in prompt and "quy tắc, hãy nói" not in prompt
     # catalog dishes still appear, in the catalog's own spelling
     assert "gần nhất chê: Phở bò, Bún chả" in prompt
+
+
+def _usage_statuses():
+    import json
+    from pathlib import Path
+
+    path = Path(settings.usage_file)
+    return [json.loads(ln)["status"] for ln in path.read_text().splitlines()] if path.exists() else []
+
+
+def _mock_ollama(app, handler):
+    """Swap in a real OllamaClient whose HTTP goes to a MockTransport."""
+    import httpx
+
+    from angi.ollama_client import OllamaClient
+
+    app.state.ollama = OllamaClient(
+        httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://ollama.test")
+    )
+
+
+def test_model_missing_falls_back_not_500(monkeypatch):
+    # e.g. someone deletes qwen2.5:7b from Ollama -> /api/chat answers 404
+    import httpx
+    from starlette.testclient import TestClient
+
+    from angi.main import create_app
+    from angi.ollama_client import OllamaClient
+
+    async def no_warmup(self):
+        return None
+
+    monkeypatch.setattr(OllamaClient, "warmup", no_warmup)
+    app = create_app()
+    with TestClient(app) as client:
+        for handler in (
+            lambda req: httpx.Response(404, json={"error": "model not found"}),
+            lambda req: httpx.Response(200, content=b"<html>proxy error</html>"),
+        ):
+            _mock_ollama(app, handler)
+            resp = client.post("/api/suggest", json={})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["fallback"] is True
+            assert data["dish"] in data["line"]
+    assert _usage_statuses() == ["canned_error", "canned_error"]
+
+
+def test_dropped_connection_falls_back_not_500(monkeypatch):
+    import httpx
+    from starlette.testclient import TestClient
+
+    from angi.main import create_app
+    from angi.ollama_client import OllamaClient
+
+    async def no_warmup(self):
+        return None
+
+    def handler(req):
+        if req.url.path == "/api/version":
+            raise httpx.ConnectError("still down")
+        raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+
+    monkeypatch.setattr(OllamaClient, "warmup", no_warmup)
+    app = create_app()
+    with TestClient(app) as client:
+        _mock_ollama(app, handler)
+        for _ in range(2):  # 2nd request goes through the known_down ping path
+            resp = client.post("/api/suggest", json={})
+            assert resp.status_code == 200
+            assert resp.json()["fallback"] is True
+    assert _usage_statuses() == ["canned_down", "canned_down"]
+
+
+def test_unexpected_error_still_falls_back(make_client):
+    def boom(messages):
+        raise RuntimeError("anything at all")
+
+    _, client = make_client(boom)
+    resp = client.post("/api/suggest", json={})
+    assert resp.status_code == 200
+    assert resp.json()["fallback"] is True
+    assert _usage_statuses() == ["canned_error"]
+
+
+def test_slow_generation_hits_total_deadline(monkeypatch):
+    import asyncio
+    import time
+
+    from starlette.testclient import TestClient
+
+    from angi.main import create_app
+    from angi.ollama_client import OllamaClient
+
+    async def hang(self, messages, num_predict=None, temperature=None):
+        await asyncio.sleep(30)
+
+    async def no_warmup(self):
+        return None
+
+    monkeypatch.setattr(OllamaClient, "complete", hang)
+    monkeypatch.setattr(OllamaClient, "warmup", no_warmup)
+    monkeypatch.setattr(settings, "line_deadline_s", 0.3)
+    app = create_app()
+    with TestClient(app) as client:
+        started = time.monotonic()
+        resp = client.post("/api/suggest", json={})
+        assert time.monotonic() - started < 3
+        assert resp.status_code == 200
+        assert resp.json()["fallback"] is True
+        assert app.state.gate.waiting == 0  # waiter count restored after cancel
+    assert _usage_statuses() == ["canned_timeout"]
+
+
+def test_gpu_queue_wait_is_bounded(make_client, monkeypatch):
+    # Before: the 12 s timeout only covered the HTTP call, so a request queued
+    # behind a busy GPU could wait for minutes. Simulate a GPU that never frees.
+    import asyncio
+    import time
+
+    monkeypatch.setattr(settings, "line_deadline_s", 0.3)
+    app, client = make_client(good_line)
+    app.state.gate.sem = asyncio.Semaphore(0)
+    started = time.monotonic()
+    resp = client.post("/api/suggest", json={})
+    assert time.monotonic() - started < 3
+    assert resp.json()["fallback"] is True
+    assert app.state.gate.waiting == 0

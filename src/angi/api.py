@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 import time
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -9,12 +11,13 @@ from fastapi.responses import JSONResponse
 from . import weather
 from .config import settings
 from .lines import canned_line, sanitize, sass_tier, validate
-from .ollama_client import OllamaClient, OllamaDown, OllamaTimeout
+from .ollama_client import OllamaBadResponse, OllamaClient, OllamaDown, OllamaError, OllamaTimeout
 from .picker import pick
 from .prompts import build_messages
 from .usage import log_usage
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 ERR_BAD_REQUEST = "Yêu cầu không hợp lệ."
 ERR_TOO_LARGE = "Yêu cầu quá lớn."
@@ -151,22 +154,40 @@ async def weather_now(city: str | None = None):
 async def _generate_line(state, dish_name, tier, budget, mood, wx, rejected, rejected_count, broke):
     """LLM line with the canned pool as an unbreakable floor. One calmer retry
     after a validation reject — most rejects are language drift, and a second
-    pass at lower temperature usually lands (status "ok_retry")."""
+    pass at lower temperature usually lands (status "ok_retry").
+
+    The whole thing, queue wait included, runs under line_deadline_s: the
+    per-call HTTP timeout alone let requests wait behind a busy GPU queue
+    for minutes (Cloudflare gives up at 100 s)."""
     gate = state.gate
-    ollama: OllamaClient = state.ollama
 
     def canned():
         return canned_line(tier, dish_name, broke, wx)
 
     if gate.full:
         return canned(), "canned_queue"
-    if ollama.known_down and not await ollama.ping():
-        return canned(), "canned_down"
-
     messages = build_messages(
         dish=dish_name, tier=tier, budget=budget, mood=mood,
         weather=wx, rejected=rejected, rejected_count=rejected_count, broke=broke,
     )
+    try:
+        async with asyncio.timeout(settings.line_deadline_s):
+            line, status = await _llm_line(state, messages, dish_name)
+    except TimeoutError:
+        return canned(), "canned_timeout"
+    except Exception:  # the floor: an LLM problem must never become a 500
+        logger.exception("line generation failed")
+        return canned(), "canned_error"
+    return (line, status) if line is not None else (canned(), status)
+
+
+async def _llm_line(state, messages, dish_name) -> tuple[str | None, str]:
+    """(line, status); line is None when the caller should use a canned line."""
+    gate = state.gate
+    ollama: OllamaClient = state.ollama
+
+    if ollama.known_down and not await ollama.ping():
+        return None, "canned_down"
     gen_started = time.monotonic()
 
     async def attempt(temperature: float | None):
@@ -181,9 +202,12 @@ async def _generate_line(state, dish_name, tier, budget, mood, wx, rejected, rej
     try:
         line = await attempt(None)
     except OllamaDown:
-        return canned(), "canned_down"
+        return None, "canned_down"
     except OllamaTimeout:
-        return canned(), "canned_timeout"
+        return None, "canned_timeout"
+    except OllamaBadResponse as e:
+        logger.warning("ollama gave no usable line: %s", e)
+        return None, "canned_error"
     if line is not None:
         return line, "ok"
 
@@ -191,8 +215,8 @@ async def _generate_line(state, dish_name, tier, budget, mood, wx, rejected, rej
     if elapsed < settings.retry_budget_s and not gate.full:
         try:
             line = await attempt(settings.retry_temperature)
-        except (OllamaDown, OllamaTimeout):
-            return canned(), "canned_reject"
+        except OllamaError:
+            return None, "canned_reject"
         if line is not None:
             return line, "ok_retry"
-    return canned(), "canned_reject"
+    return None, "canned_reject"
