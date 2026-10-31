@@ -10,6 +10,10 @@ from angi.ollama_client import OllamaClient
 def usage_tmp(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "usage_file", str(tmp_path / "usage.jsonl"))
     monkeypatch.setattr(settings, "weather_enabled", False)  # no network in tests
+    # Safety net: nothing in the test suite may reach the real Ollama (shared GPU,
+    # loading a model evicts other apps' models). Port 9 has no listener, so an
+    # unmocked call fails fast with a connection error instead.
+    monkeypatch.setattr(settings, "ollama_url", "http://127.0.0.1:9")
 
 
 @pytest.fixture

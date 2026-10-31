@@ -86,7 +86,12 @@ def build_messages(
     weather: str,
     rejected: list[str],
     broke: bool,
+    rejected_count: int | None = None,
 ) -> list[dict]:
+    """`rejected` = the most recent rejected names; `rejected_count` = how many
+    the user rejected in total (defaults to len(rejected))."""
+    if rejected_count is None:
+        rejected_count = len(rejected)
     hint = ""
     if rejected:
         recent = ", ".join(rejected[-3:])
@@ -97,7 +102,7 @@ def build_messages(
         f"Ngân sách: {_BUDGET_LABEL.get(budget or '', 'không nói')}. "
         f"Tâm trạng: {_MOOD_LABEL.get(mood or '', 'không rõ')}. "
         f"Thời tiết: {_WEATHER_LABEL.get(weather, 'bình thường')}. "
-        f"Đã chê {len(rejected)} món{hint}.{broke_note} Viết đúng một câu tiếng Việt."
+        f"Đã chê {rejected_count} món{hint}.{broke_note} Viết đúng một câu tiếng Việt."
     )
     messages = [{"role": "system", "content": SYSTEM}]
     for shot_user, shot_assistant in SHOTS:

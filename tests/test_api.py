@@ -144,3 +144,101 @@ def test_429_rate_limit(make_client):
     codes = [client.post("/api/suggest", json={}).status_code for _ in range(settings.rate_rpm + 1)]
     assert codes[-1] == 429
     assert all(c == 200 for c in codes[:-1])
+
+
+def test_wrong_typed_fields_are_ignored_not_500(make_client):
+    # unhashable values used to hit `value in set` -> TypeError -> HTTP 500
+    _, client = make_client(good_line)
+    for body in (
+        {"budget": []},
+        {"mood": {"a": 1}},
+        {"city": ["hn"]},
+        {"budget": 20, "mood": True, "city": 1.5},
+        {"budget": None, "mood": None, "city": None, "client_date": None},
+        {"client_date": ["2026-07-28"]},
+        {"client_date": "not-a-date"},
+    ):
+        resp = client.post("/api/suggest", json=body)
+        assert resp.status_code == 200, body
+        assert resp.json()["dish"]
+
+
+def test_non_object_json_is_400(make_client):
+    _, client = make_client(good_line)
+    for body in ([1, 2], "phở", 42, None):
+        assert client.post("/api/suggest", json=body).status_code == 400
+
+
+def test_invalid_utf8_body_is_400(make_client):
+    _, client = make_client(good_line)
+    resp = client.post("/api/suggest", content=b"\xff\xfe{}", headers={"Content-Type": "application/json"})
+    assert resp.status_code == 400
+
+
+def test_oversized_body_is_413(make_client):
+    from angi.api import MAX_BODY_BYTES
+
+    _, client = make_client(good_line)
+    big = {"rejected": ["Phở bò"] * (MAX_BODY_BYTES // 8)}
+    resp = client.post("/api/suggest", json=big)
+    assert resp.status_code == 413
+    assert resp.json()["error"]
+
+
+def test_oversized_chunked_body_is_413(make_client):
+    # no Content-Length header: the size cap must hold while streaming
+    from angi.api import MAX_BODY_BYTES
+
+    _, client = make_client(good_line)
+
+    def chunks():
+        yield b'{"rejected": ['
+        for _ in range(MAX_BODY_BYTES // 8):
+            yield b'"Ph\xe1\xbb\x9f b\xc3\xb2",'
+        yield b'"x"]}'
+
+    resp = client.post("/api/suggest", content=chunks(), headers={"Content-Type": "application/json"})
+    assert resp.status_code == 413
+
+
+def test_bogus_content_length_is_400(make_client):
+    _, client = make_client(good_line)
+    resp = client.post(
+        "/api/suggest", content=b"{}",
+        headers={"Content-Type": "application/json", "Content-Length": "abc"},
+    )
+    assert resp.status_code in (400, 413)
+
+
+def test_most_recent_rejections_are_kept(make_client, monkeypatch):
+    from angi import picker
+    from angi.dishes import DISHES
+
+    pools = []
+    real_choice = picker.random.choice
+
+    def spy(seq):
+        seq = list(seq)
+        if seq and hasattr(seq[0], "price_tier"):
+            pools.append(seq)
+        return real_choice(seq)
+
+    monkeypatch.setattr(picker.random, "choice", spy)
+    prompts = []
+
+    def capture(messages):
+        prompts.append(messages[-1]["content"])
+        return good_line(messages)
+
+    _, client = make_client(capture)
+    names = [d.name for d in DISHES[:40]]
+    resp = client.post("/api/suggest", json={"rejected": names})
+    assert resp.status_code == 200
+    assert resp.json()["tier"] == 5
+    # the 30 MOST RECENT rejections are excluded (old code kept the first 30,
+    # so dishes rejected after #30 could be suggested again right away)
+    assert not {d.name for d in pools[-1]} & set(names[-30:])
+    # the prompt sees the true count and the latest names
+    assert "Đã chê 40 món" in prompts[-1]
+    assert names[-1] in prompts[-1]
+    assert names[0] not in prompts[-1]

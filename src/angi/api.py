@@ -1,3 +1,4 @@
+import json
 import time
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -16,12 +17,52 @@ from .usage import log_usage
 router = APIRouter()
 
 ERR_BAD_REQUEST = "Yêu cầu không hợp lệ."
+ERR_TOO_LARGE = "Yêu cầu quá lớn."
 ERR_RATE = "Từ từ thôi! Đổi món gì mà nhanh thế. Đợi một phút nhé."
+
+# A real body is a few hundred bytes (budget/mood/city + rejected dish names);
+# 64 KB still fits ~2000 rejected names. Anything bigger is abuse.
+MAX_BODY_BYTES = 64 * 1024
+# Rejected names the picker excludes and the prompt sees: the MOST RECENT ones.
+MAX_REJECTED_KEPT = 30
+MAX_NAME_CHARS = 60
 
 _VALID_BUDGET = {"20", "50", "max"}
 _VALID_MOOD = {"vui", "met", "deadline"}
 _VALID_CITY = {"hn", "sg"}
 _TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+
+class _BadBody(Exception):
+    def __init__(self, status: int, error: str):
+        self.status = status
+        self.error = error
+
+
+async def _read_json(request: Request):
+    """Parse the JSON body, refusing anything over MAX_BODY_BYTES without
+    buffering it (uvicorn itself has no body-size limit)."""
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > MAX_BODY_BYTES:
+                raise _BadBody(413, ERR_TOO_LARGE)
+        except ValueError:
+            raise _BadBody(400, ERR_BAD_REQUEST) from None
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > MAX_BODY_BYTES:
+            raise _BadBody(413, ERR_TOO_LARGE)
+    try:
+        return json.loads(raw)
+    except ValueError:  # JSONDecodeError and UnicodeDecodeError
+        raise _BadBody(400, ERR_BAD_REQUEST) from None
+
+
+def _enum(value, allowed: set[str]) -> str | None:
+    # isinstance first: `[] in a_set` raises TypeError (unhashable) -> HTTP 500
+    return value if isinstance(value, str) and value in allowed else None
 
 
 def _client_date(raw) -> date:
@@ -36,21 +77,25 @@ def _client_date(raw) -> date:
 @router.post("/api/suggest")
 async def suggest(request: Request):
     try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse(status_code=400, content={"error": ERR_BAD_REQUEST})
+        body = await _read_json(request)
+    except _BadBody as e:
+        return JSONResponse(status_code=e.status, content={"error": e.error})
     if not isinstance(body, dict):
         return JSONResponse(status_code=400, content={"error": ERR_BAD_REQUEST})
 
-    budget = body.get("budget") if body.get("budget") in _VALID_BUDGET else None
-    mood = body.get("mood") if body.get("mood") in _VALID_MOOD else None
-    city = body.get("city") if body.get("city") in _VALID_CITY else None
+    budget = _enum(body.get("budget"), _VALID_BUDGET)
+    mood = _enum(body.get("mood"), _VALID_MOOD)
+    city = _enum(body.get("city"), _VALID_CITY)
     raw_rejected = body.get("rejected")
     if raw_rejected is None:
         raw_rejected = []
     if not isinstance(raw_rejected, list):
         return JSONResponse(status_code=400, content={"error": ERR_BAD_REQUEST})
-    rejected = [r[:60] for r in raw_rejected if isinstance(r, str)][:30]
+    names = [r[:MAX_NAME_CHARS] for r in raw_rejected if isinstance(r, str)]
+    rejected_count = len(names)
+    # keep the most recent names: the frontend appends, so the old [:30] kept
+    # the oldest ones and let dishes rejected after #30 come straight back
+    rejected = names[-MAX_REJECTED_KEPT:]
     today = _client_date(body.get("client_date"))
 
     ip = request.headers.get("x-real-ip") or (
@@ -63,10 +108,12 @@ async def suggest(request: Request):
     started = time.monotonic()
     wx = await weather.current(city)
     dish = pick(budget, wx, rejected)
-    tier = sass_tier(len(rejected))
+    tier = sass_tier(rejected_count)
     broke = today.day >= 25 and budget == "20"
 
-    line, status = await _generate_line(state, dish.name, tier, budget, mood, wx, rejected, broke)
+    line, status = await _generate_line(
+        state, dish.name, tier, budget, mood, wx, rejected, rejected_count, broke
+    )
     fallback = status not in ("ok", "ok_retry")
     duration_ms = int((time.monotonic() - started) * 1000)
     log_usage(
@@ -101,7 +148,7 @@ async def weather_now(city: str | None = None):
     )
 
 
-async def _generate_line(state, dish_name, tier, budget, mood, wx, rejected, broke):
+async def _generate_line(state, dish_name, tier, budget, mood, wx, rejected, rejected_count, broke):
     """LLM line with the canned pool as an unbreakable floor. One calmer retry
     after a validation reject — most rejects are language drift, and a second
     pass at lower temperature usually lands (status "ok_retry")."""
@@ -118,7 +165,7 @@ async def _generate_line(state, dish_name, tier, budget, mood, wx, rejected, bro
 
     messages = build_messages(
         dish=dish_name, tier=tier, budget=budget, mood=mood,
-        weather=wx, rejected=rejected, broke=broke,
+        weather=wx, rejected=rejected, rejected_count=rejected_count, broke=broke,
     )
     gen_started = time.monotonic()
 
