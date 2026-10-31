@@ -24,31 +24,51 @@ async def current_full(city: str | None) -> tuple[str, float | None]:
         return "any", None
     now = time.monotonic()
     hit = _cache.get(city)
-    if hit and now - hit[0] < settings.weather_cache_s:
+    if hit and now < hit[0]:
         return hit[1], hit[2]
-    fit, temp = await _fetch(city)
-    _cache[city] = (now, fit, temp)
+    try:
+        fit, temp = await _fetch(city)
+        ttl = settings.weather_cache_s
+    except Exception as e:
+        # Cache the failure briefly too: otherwise, while open-meteo is down,
+        # every request with a city waits out the 3 s timeout again, and the
+        # unthrottled /api/weather turns each visitor hit into an outbound call.
+        logger.warning("weather fetch failed for %s: %s", city, e)
+        fit, temp, ttl = "any", None, settings.weather_retry_s
+    _cache[city] = (now + ttl, fit, temp)
     return fit, temp
 
 
 async def _fetch(city: str) -> tuple[str, float | None]:
+    """Raises on any network or data problem; current_full degrades."""
     lat, lon = _COORDS[city]
     url = (
         "https://api.open-meteo.com/v1/forecast"
         f"?latitude={lat}&longitude={lon}"
         "&current=temperature_2m,precipitation,weather_code"
     )
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            cur = resp.json()["current"]
-    except Exception as e:
-        logger.warning("weather fetch failed for %s: %s", city, e)
-        return "any", None
-    temp = cur.get("temperature_2m")
-    if cur.get("precipitation", 0) > 0.2 or cur.get("weather_code") in _RAIN_CODES:
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        return _classify(resp.json()["current"])
+
+
+def _num(value) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _classify(cur) -> tuple[str, float | None]:
+    # open-meteo may send null for a missing reading; the old code compared
+    # None > 0.2 OUTSIDE its try block and turned that into an HTTP 500
+    if not isinstance(cur, dict):
+        raise ValueError(f"unexpected 'current' block: {cur!r:.100}")
+    temp = _num(cur.get("temperature_2m"))
+    precip = _num(cur.get("precipitation")) or 0.0
+    code = _num(cur.get("weather_code"))
+    if precip > 0.2 or (code is not None and code.is_integer() and int(code) in _RAIN_CODES):
         return "rain", temp
-    if (temp or 0) >= 34:
+    if temp is not None and temp >= 34:
         return "hot", temp
     return "any", temp

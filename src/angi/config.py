@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     max_queue: int = 8
     weather_enabled: bool = True
     weather_cache_s: float = 1800.0
+    weather_retry_s: float = 300.0  # after a failed fetch, serve "any" this long
     usage_file: str = "/data/usage.jsonl"
     ip_hash_salt: str = "angi"
 
