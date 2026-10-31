@@ -3,5 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
-data/
+# runtime data (usage.jsonl) at the repo root only. Unanchored `data/` also
+# matched src/angi/data/, which kept the dish catalog out of git and wheels.
+/data/
 .env
