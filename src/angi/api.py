@@ -1,4 +1,5 @@
 import asyncio
+import ipaddress
 import json
 import logging
 import time
@@ -68,6 +69,32 @@ def _enum(value, allowed: set[str]) -> str | None:
     return value if isinstance(value, str) and value in allowed else None
 
 
+def _visitor_key(request: Request) -> str:
+    """Rate-limit key for the real visitor.
+
+    Requests arrive cloudflared -> nginx (127.0.0.1) -> here, and nginx sets
+    X-Real-IP to $remote_addr, i.e. 127.0.0.1 for EVERY visitor, so keying on it
+    made the "per-IP" limit one global bucket. Cloudflare's CF-Connecting-IP
+    carries the visitor address (clients can't override it through Cloudflare,
+    and this app only listens on loopback). IPv6 is keyed per /64, because one
+    host can rotate through a whole /64.
+    """
+    raw = (
+        request.headers.get("cf-connecting-ip")
+        or request.headers.get("x-real-ip")
+        or (request.client.host if request.client else "unknown")
+    ).strip()
+    try:
+        ip = ipaddress.ip_address(raw)
+    except ValueError:
+        return raw[:64] or "unknown"
+    if ip.version == 6:
+        if ip.ipv4_mapped is not None:
+            return str(ip.ipv4_mapped)
+        return f"{ipaddress.ip_network(f'{ip}/64', strict=False).network_address}/64"
+    return str(ip)
+
+
 def _client_date(raw) -> date:
     if isinstance(raw, str):
         try:
@@ -101,9 +128,7 @@ async def suggest(request: Request):
     rejected = names[-MAX_REJECTED_KEPT:]
     today = _client_date(body.get("client_date"))
 
-    ip = request.headers.get("x-real-ip") or (
-        request.client.host if request.client else "unknown"
-    )
+    ip = _visitor_key(request)
     state = request.app.state
     if not state.rpm.allow(ip):
         return JSONResponse(status_code=429, content={"error": ERR_RATE})
@@ -181,6 +206,10 @@ async def _generate_line(state, dish_name, tier, budget, mood, wx, rejected, rej
     return (line, status) if line is not None else (canned(), status)
 
 
+class _OverBudget(Exception):
+    """Global LLM budget (llm_rpm_global) used up for this minute."""
+
+
 async def _llm_line(state, messages, dish_name) -> tuple[str | None, str]:
     """(line, status); line is None when the caller should use a canned line."""
     gate = state.gate
@@ -191,6 +220,8 @@ async def _llm_line(state, messages, dish_name) -> tuple[str | None, str]:
     gen_started = time.monotonic()
 
     async def attempt(temperature: float | None):
+        if not state.llm_budget.allow("all"):
+            raise _OverBudget()
         gate.waiting += 1
         try:
             async with gate.sem:
@@ -201,6 +232,8 @@ async def _llm_line(state, messages, dish_name) -> tuple[str | None, str]:
 
     try:
         line = await attempt(None)
+    except _OverBudget:
+        return None, "canned_busy"
     except OllamaDown:
         return None, "canned_down"
     except OllamaTimeout:
@@ -215,7 +248,7 @@ async def _llm_line(state, messages, dish_name) -> tuple[str | None, str]:
     if elapsed < settings.retry_budget_s and not gate.full:
         try:
             line = await attempt(settings.retry_temperature)
-        except OllamaError:
+        except (OllamaError, _OverBudget):
             return None, "canned_reject"
         if line is not None:
             return line, "ok_retry"

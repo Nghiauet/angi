@@ -33,6 +33,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.rpm = SlidingWindow(settings.rate_rpm, 60.0)
+    app.state.llm_budget = SlidingWindow(settings.llm_rpm_global, 60.0)
     app.state.gate = GpuGate(settings.max_queue)
 
     @app.get("/health")

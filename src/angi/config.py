@@ -16,7 +16,10 @@ class Settings(BaseSettings):
     line_deadline_s: float = 20.0
     retry_temperature: float = 0.6  # calmer second attempt after a validation reject
     retry_budget_s: float = 6.0  # only retry if the first attempt came back fast enough
-    rate_rpm: int = 20  # re-rolling IS the product, be generous
+    rate_rpm: int = 20  # per visitor; re-rolling IS the product, be generous
+    # GPU budget across ALL visitors: LLM calls per minute. Past it, requests get
+    # canned lines (still 200) so a crowd can't keep the shared GPU busy.
+    llm_rpm_global: int = 30
     max_queue: int = 8
     weather_enabled: bool = True
     weather_cache_s: float = 1800.0

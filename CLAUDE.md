@@ -54,7 +54,9 @@ wheel with attitude.
   city: "hn"|"sg"|null, rejected: [names], client_date: "YYYY-MM-DD"}` →
   `{dish, line, tier: 0-5, fallback, price_tier, category, weather, broke}`.
   Always 200 for valid input. 400 only malformed shape; 429 only rate limiter
-  (20 req/min per X-Real-IP). Broke mode: day >= 25 + budget "20" → mì tôm jokes.
+  (20 req/min per visitor, keyed on CF-Connecting-IP, IPv6 per /64 — nginx's
+  X-Real-IP is always 127.0.0.1 here, cloudflared is local). Broke mode: day >= 25
+  + budget "20" → mì tôm jokes.
 - `GET /api/weather?city=hn|sg` → `{weather, temp_c}` (cached, never GPU; 400 bad city).
 
 Frontend game layer (all client-side, localStorage): achievement badges at 10/20/30
@@ -82,4 +84,6 @@ card, localStorage daily session), Docker multi-stage uv build, host Ollama
   generations serialize across both apps; angi's 12s timeout → canned line keeps UX OK.
 - Health metric: fallback rate. `jq 'select(.fallback==true)' data/usage.jsonl | wc -l`
   vs total — if >15%, tune prompts (step: preview_lines.py).
-- Rate-limit state is in-memory, resets on restart.
+- Rate-limit state is in-memory, resets on restart. Besides the per-visitor 429
+  limit, `llm_rpm_global` (30 LLM calls/min across all visitors) caps GPU work;
+  past it requests still get 200 with a canned line (status `canned_busy`).

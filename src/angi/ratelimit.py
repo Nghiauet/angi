@@ -23,13 +23,16 @@ class SlidingWindow:
         if len(dq) >= self.limit:
             return False
         dq.append(now)
-        self._prune()
+        self._prune(cutoff)
         return True
 
-    def _prune(self) -> None:
+    def _prune(self, cutoff: float) -> None:
+        # Drop keys with no hit inside the window. (Deques are only trimmed when
+        # their own key comes back, so the old `if v` test kept every key ever
+        # seen: one entry per visitor until restart.)
         self._calls += 1
         if self._calls % _PRUNE_EVERY == 0:
-            self.hits = {k: v for k, v in self.hits.items() if v}
+            self.hits = {k: v for k, v in self.hits.items() if v and v[-1] > cutoff}
 
 
 class GpuGate:
