@@ -189,6 +189,12 @@
       lineEl.classList.add("loading");
       lineEl.textContent = "Đang nghĩ câu cà khịa… 🍳";
     }
+    // A failed re-roll keeps the current dish on screen; put its line back too,
+    // instead of leaving the "thinking…" placeholder up until the next success.
+    const restoreLine = () => {
+      lineEl.classList.remove("loading");
+      if (current && !resultCard.hidden) lineEl.textContent = current.line;
+    };
 
     try {
       const res = await fetch("/api/suggest", {
@@ -203,10 +209,12 @@
         }),
       });
       if (res.status === 429) {
+        restoreLine();
         showToast((await res.json()).error);
         return;
       }
       if (!res.ok) {
+        restoreLine();
         showToast("Có lỗi xảy ra, thử lại nhé.");
         return;
       }
@@ -215,7 +223,7 @@
       currentRejected = false;
       render(data);
     } catch (e) {
-      lineEl.classList.remove("loading");
+      restoreLine();
       showToast(OFFLINE_LINES[Math.floor(Math.random() * OFFLINE_LINES.length)]);
     } finally {
       rollBtn.disabled = false;
