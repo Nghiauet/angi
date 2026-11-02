@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from starlette.requests import ClientDisconnect
 
 from . import weather
 from .config import settings
@@ -63,10 +64,16 @@ async def _read_json(request: Request):
         except ValueError:
             raise _BadBody(400, ERR_BAD_REQUEST) from None
     raw = bytearray()
-    async for chunk in request.stream():
-        raw += chunk
-        if len(raw) > MAX_BODY_BYTES:
-            raise _BadBody(413, ERR_TOO_LARGE)
+    try:
+        async for chunk in request.stream():
+            raw += chunk
+            if len(raw) > MAX_BODY_BYTES:
+                raise _BadBody(413, ERR_TOO_LARGE)
+    except ClientDisconnect:
+        # The visitor left mid-upload. Nobody reads the reply, but uncaught this
+        # logged "Exception in ASGI application" plus a full traceback per request
+        # (the old `request.json()` sat inside `except Exception`).
+        raise _BadBody(400, ERR_BAD_REQUEST) from None
     try:
         return json.loads(raw)
     except ValueError:  # JSONDecodeError and UnicodeDecodeError

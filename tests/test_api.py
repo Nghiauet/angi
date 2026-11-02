@@ -411,3 +411,35 @@ def test_non_json_content_type_is_415(make_client):
     assert calls == []  # no GPU work for any of them
     ok = client.post("/api/suggest", content=b"{}", headers={"Content-Type": "Application/JSON; charset=utf-8"})
     assert ok.status_code == 200
+
+
+def test_client_disconnect_mid_body_is_400_not_a_traceback(make_client):
+    # uvicorn sends http.disconnect when a visitor drops mid-upload, and
+    # request.stream() then raises ClientDisconnect. Uncaught, that escaped the
+    # app as "Exception in ASGI application" with a traceback on every such request.
+    import asyncio
+
+    app, _ = make_client(good_line)
+    incoming = [
+        {"type": "http.request", "body": b'{"rejected": ["Ph', "more_body": True},
+        {"type": "http.disconnect"},
+    ]
+    sent = []
+
+    async def receive():
+        return incoming.pop(0) if incoming else {"type": "http.disconnect"}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+        "method": "POST", "scheme": "http", "path": "/api/suggest", "raw_path": b"/api/suggest",
+        "query_string": b"", "root_path": "",
+        "headers": [(b"content-type", b"application/json"), (b"content-length", b"500")],
+        "client": ("127.0.0.1", 50000), "server": ("127.0.0.1", 46405),
+        "state": {},
+    }
+    asyncio.run(app(scope, receive, send))  # must not raise
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    assert start["status"] == 400
