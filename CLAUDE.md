@@ -96,3 +96,6 @@ card, localStorage daily session), Docker multi-stage uv build, host Ollama
 - Rate-limit state is in-memory, resets on restart. Besides the per-visitor 429
   limit, `llm_rpm_global` (30 LLM calls/min across all visitors) caps GPU work;
   past it requests still get 200 with a canned line (status `canned_busy`).
+- `usage.jsonl` `ip_hash`: salted with a random per-process salt (IP_HASH_SALT unset), so
+  it groups one visitor's requests within a run but can't be reversed to an address.
+  Records written before 2026-11 all carry the hash of 127.0.0.1.

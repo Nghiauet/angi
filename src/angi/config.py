@@ -25,7 +25,10 @@ class Settings(BaseSettings):
     weather_cache_s: float = 1800.0
     weather_retry_s: float = 300.0  # after a failed fetch, serve "any" this long
     usage_file: str = "/data/usage.jsonl"
-    ip_hash_salt: str = "angi"
+    # "" = a random salt per process, so usage-log ip_hash values can't be turned
+    # back into addresses (see usage.ip_hash). Set IP_HASH_SALT (a secret) only if
+    # hashes must stay comparable across restarts.
+    ip_hash_salt: str = ""
 
 
 settings = Settings()

@@ -1,12 +1,25 @@
 import hashlib
 import json
 import logging
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import settings
 
 logger = logging.getLogger("angi.usage")
+
+# ip_hash tells requests from one visitor apart from another's without storing who
+# they are. With a known salt (the old default "angi" is in the repo) any IPv4 hash
+# is reversed by hashing all 2^32 addresses, and now that rate limiting keys on the
+# real visitor (CF-Connecting-IP) the log would hold reversible addresses, while
+# the page promises "không lưu gì cả". This salt lives only in memory.
+_PROCESS_SALT = secrets.token_hex(16)
+
+
+def ip_hash(ip: str) -> str:
+    salt = settings.ip_hash_salt or _PROCESS_SALT
+    return hashlib.sha256((salt + ip).encode()).hexdigest()[:12]
 
 
 def log_usage(
@@ -32,7 +45,7 @@ def log_usage(
         "fallback": fallback,
         "status": status,
         "duration_ms": duration_ms,
-        "ip_hash": hashlib.sha256((settings.ip_hash_salt + ip).encode()).hexdigest()[:12],
+        "ip_hash": ip_hash(ip),
     }
     line = json.dumps(rec, ensure_ascii=False)
     logger.info(line)
