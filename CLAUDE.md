@@ -10,7 +10,7 @@ the user rejects dishes. Public at `https://angi.wakeuplate.io.vn/`.
 uv sync                                   # install deps
 uv run pytest                             # unit tests (Ollama mocked, weather disabled)
 uv run python scripts/preview_lines.py    # persona tuning harness (needs live Ollama)
-uv run uvicorn angi.main:app --host 127.0.0.1 --port 46405 --reload   # dev server
+uv run uvicorn angi.main:app --host 127.0.0.1 --port 46495 --reload   # dev server (46405 is the live container)
 docker compose up -d --build              # production container
 bash scripts/smoke.sh                     # live e2e test
 ```
@@ -32,7 +32,7 @@ Core principle: **the app never breaks**. Ollama down/slow/queue-full or bad out
 → canned line from `lines.py` pools (`fallback: true`). Worst case it's a random
 wheel with attitude.
 
-- `src/angi/dishes.py` + `data/dishes.json` — ~170 dishes, quota-tested (tiers/categories;
+- `src/angi/dishes.py` + `src/angi/data/dishes.json` — ~170 dishes, quota-tested (tiers/categories;
   ≥12 tier-1 noodles so budget-20k mode isn't bread/snack-only).
 - `src/angi/picker.py` — budget is HARD filter; weather/delivery soft, relaxed in order.
 - `src/angi/lines.py` — sass_tier (0-5 by rejection count: 3=roast at 5-7, 4=resigned-
@@ -86,7 +86,7 @@ card, localStorage daily session), Docker multi-stage uv build, host Ollama
 
 ## Ops notes
 
-- **Shares the GPU** (6 GB, one big model at a time — see the hub CLAUDE.md, "Local LLM").
+- **Shares the GPU** (6 GB, one big model at a time — see "Ollama" under Hazards in the hub CLAUDE.md and hub memory `local-llm-ollama`).
   tiengviet, which used the same model, was archived 2026-10-31: angi is now the caller
   that keeps `qwen2.5:7b-instruct-q4_K_M` in Ollama, and loading it evicts the everyday
   model. If that model is removed, angi serves canned lines (status `canned_error`).
