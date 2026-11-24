@@ -75,27 +75,7 @@ Python 3.11+/FastAPI/httpx/pydantic-settings, uv, vanilla JS frontend (canvas sh
 card, localStorage daily session), Docker multi-stage uv build, host Ollama
 `qwen2.5:7b-instruct-q4_K_M` at **temperature 0.8** (0.9 caused Chinese code-switching).
 
-## Deployment notes
+## Server-specific notes
 
-- **network_mode: host REQUIRED** (Ollama loopback-only); uvicorn binds
-  `127.0.0.1:46405` in the Dockerfile CMD — never 0.0.0.0. Verify:
-  `ss -tlnp | grep 46405` shows 127.0.0.1 only.
-- Subdomain: `ANGI_*` vars in `/home/nghiaph/nghiaph_workspace/nginx_setup/`
-  setup_nginx.sh + setup_cloudflare_tunnel.sh; re-run both with sudo to apply.
-- Port registered in `../ADD_PROJECT_AND_MAP_DOMAIN.md` (46405).
-
-## Ops notes
-
-- **Shares the GPU** (6 GB, one big model at a time — see "Ollama" under Hazards in the hub CLAUDE.md and hub memory `local-llm-ollama`).
-  tiengviet, which used the same model, was archived 2026-10-31: angi is now the caller
-  that keeps `qwen2.5:7b-instruct-q4_K_M` in Ollama, and loading it evicts the everyday
-  model. If that model is removed, angi serves canned lines (status `canned_error`).
-  Line budget: 12 s per Ollama call, 20 s total including the GPU queue → canned line.
-- Health metric: fallback rate. `jq 'select(.fallback==true)' data/usage.jsonl | wc -l`
-  vs total — if >15%, tune prompts (step: preview_lines.py).
-- Rate-limit state is in-memory, resets on restart. Besides the per-visitor 429
-  limit, `llm_rpm_global` (30 LLM calls/min across all visitors) caps GPU work;
-  past it requests still get 200 with a canned line (status `canned_busy`).
-- `usage.jsonl` `ip_hash`: salted with a random per-process salt (IP_HASH_SALT unset), so
-  it groups one visitor's requests within a run but can't be reversed to an address.
-  Records written before 2026-11 all carry the hash of 127.0.0.1.
+Deployment and ops notes for the server this runs on live in `CLAUDE.local.md`
+(machine-local, listed in `.git/info/exclude`, never committed).
